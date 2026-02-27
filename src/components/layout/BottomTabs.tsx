@@ -6,8 +6,12 @@ import {
   Share2,
   FolderOpen,
   StickyNote,
+  Settings,
+  Sun,
+  Moon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useThemeStore } from '@/stores/themeStore'
 
 const tabs = [
   { to: '/', icon: LayoutDashboard, label: 'Home' },
@@ -15,9 +19,12 @@ const tabs = [
   { to: '/share', icon: Share2, label: 'Share' },
   { to: '/files', icon: FolderOpen, label: 'Files' },
   { to: '/notes', icon: StickyNote, label: 'Notes' },
+  { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 
 export function BottomTabs() {
+  const { isDark, toggleTheme } = useThemeStore()
+
   return (
     <nav
       className={cn(
@@ -26,7 +33,7 @@ export function BottomTabs() {
         'safe-area-bottom'
       )}
     >
-      <div className="flex items-center justify-around h-16 px-2">
+      <div className="flex items-center justify-around h-16 px-1">
         {tabs.map((tab) => (
           <NavLink
             key={tab.to}
@@ -34,8 +41,8 @@ export function BottomTabs() {
             end={tab.to === '/'}
             className={({ isActive }) =>
               cn(
-                'flex flex-col items-center justify-center gap-0.5 px-3 py-1.5 rounded-xl',
-                'transition-all duration-200 relative min-w-[56px]',
+                'flex flex-col items-center justify-center gap-0.5 px-2 py-1.5 rounded-xl',
+                'transition-all duration-200 relative min-w-[44px]',
                 isActive
                   ? 'text-primary'
                   : 'text-muted-foreground'
@@ -59,6 +66,21 @@ export function BottomTabs() {
             )}
           </NavLink>
         ))}
+
+        {/* Theme toggle */}
+        <button
+          onClick={toggleTheme}
+          className={cn(
+            'flex flex-col items-center justify-center gap-0.5 px-2 py-1.5 rounded-xl',
+            'transition-all duration-200 min-w-[44px]',
+            'text-muted-foreground'
+          )}
+        >
+          {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          <span className="text-[10px] font-medium">
+            {isDark ? 'Light' : 'Dark'}
+          </span>
+        </button>
       </div>
       {/* Safe area spacer for iOS */}
       <div className="h-[env(safe-area-inset-bottom)]" />

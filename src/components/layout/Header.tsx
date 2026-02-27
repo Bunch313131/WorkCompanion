@@ -1,15 +1,11 @@
 import { useState } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search,
   X,
-  Sun,
-  Moon,
-  Settings,
   Zap,
 } from 'lucide-react'
-import { useThemeStore } from '@/stores/themeStore'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { APP_NAME, APP_LOGO } from '@/lib/constants'
 import { cn } from '@/lib/utils'
@@ -26,9 +22,7 @@ const PAGE_TITLES: Record<string, string> = {
 export function Header() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const { isDark, toggleTheme } = useThemeStore()
   const isMobile = useIsMobile()
-  const navigate = useNavigate()
   const location = useLocation()
 
   const pageTitle = PAGE_TITLES[location.pathname] || ''
@@ -114,31 +108,6 @@ export function Header() {
           )}
         </AnimatePresence>
 
-        {/* Theme toggle (mobile only — desktop has it in sidebar) */}
-        {isMobile && (
-          <button
-            onClick={toggleTheme}
-            className={cn(
-              'p-2 rounded-lg hover:bg-accent transition-colors',
-              'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-          </button>
-        )}
-
-        {/* Settings (mobile only — desktop has it in sidebar) */}
-        {isMobile && (
-          <button
-            onClick={() => navigate('/settings')}
-            className={cn(
-              'p-2 rounded-lg hover:bg-accent transition-colors',
-              'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            <Settings className="w-5 h-5" />
-          </button>
-        )}
       </div>
     </header>
   )
