@@ -12,10 +12,12 @@ import {
   X,
   File,
   Inbox,
+  Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { formatFileSize, getRelativeTime, generateId } from '@/lib/utils'
-import type { SharedFile } from '@/types/share'
+import { formatFileSize, getRelativeTime } from '@/lib/utils'
+import { useQuickShare } from '@/hooks/useQuickShare'
+import type { QuickShareFile } from '@/hooks/useQuickShare'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 
 const DEVICE_ICONS = {
@@ -26,49 +28,12 @@ const DEVICE_ICONS = {
   unknown: Monitor,
 } as const
 
-function detectDeviceType(): SharedFile['senderDeviceType'] {
-  const ua = navigator.userAgent
-  if (/Mobi|Android/i.test(ua)) return 'phone'
-  if (/Tablet|iPad/i.test(ua)) return 'tablet'
-  return 'laptop'
-}
-
-const DEVICE_NAME = (() => {
-  const type = detectDeviceType()
-  const platform = navigator.platform || 'Unknown'
-  if (platform.includes('Mac')) return 'Mac'
-  if (platform.includes('Win')) return 'Windows PC'
-  if (type === 'phone') return 'Phone'
-  return 'Device'
-})()
-
 export default function QuickShare() {
-  const [sharedFiles, setSharedFiles] = useState<SharedFile[]>([])
+  const { files, loading, uploads, uploadFiles, removeFile, deviceName, deviceType } = useQuickShare()
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const isMobile = useIsMobile()
-
-  const handleFiles = useCallback((files: FileList | null) => {
-    if (!files) return
-    const newSharedFiles: SharedFile[] = Array.from(files).map((file) => ({
-      id: generateId(),
-      name: file.name,
-      mimeType: file.type,
-      size: file.size,
-      storageUrl: '',
-      downloadUrl: URL.createObjectURL(file),
-      thumbnailUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
-      senderDeviceId: 'local',
-      senderDeviceName: DEVICE_NAME,
-      senderDeviceType: detectDeviceType(),
-      expiresAt: null,
-      downloaded: false,
-      createdAt: new Date().toISOString(),
-      userId: '',
-    }))
-    setSharedFiles((prev) => [...newSharedFiles, ...prev])
-  }, [])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -83,14 +48,12 @@ export default function QuickShare() {
     (e: React.DragEvent) => {
       e.preventDefault()
       setIsDragging(false)
-      handleFiles(e.dataTransfer.files)
+      uploadFiles(e.dataTransfer.files)
     },
-    [handleFiles]
+    [uploadFiles]
   )
 
-  const removeFile = (id: string) => {
-    setSharedFiles((prev) => prev.filter((f) => f.id !== id))
-  }
+  const DeviceIcon = DEVICE_ICONS[deviceType]
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -180,7 +143,10 @@ export default function QuickShare() {
           type="file"
           multiple
           className="hidden"
-          onChange={(e) => handleFiles(e.target.files)}
+          onChange={(e) => {
+            uploadFiles(e.target.files)
+            e.target.value = ''
+          }}
         />
         <input
           ref={cameraInputRef}
@@ -188,33 +154,64 @@ export default function QuickShare() {
           accept="image/*"
           capture="environment"
           className="hidden"
-          onChange={(e) => handleFiles(e.target.files)}
+          onChange={(e) => {
+            uploadFiles(e.target.files)
+            e.target.value = ''
+          }}
         />
       </motion.div>
 
       {/* Device info */}
       <div className="flex items-center gap-2 px-1">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {(() => {
-            const DeviceIcon = DEVICE_ICONS[detectDeviceType()]
-            return <DeviceIcon className="w-4 h-4" />
-          })()}
-          <span>Sending from: <strong className="text-foreground">{DEVICE_NAME}</strong></span>
+          <DeviceIcon className="w-4 h-4" />
+          <span>Sending from: <strong className="text-foreground">{deviceName}</strong></span>
         </div>
       </div>
 
+      {/* Upload Progress */}
+      {uploads.length > 0 && (
+        <div className="space-y-2">
+          {uploads.map((upload) => (
+            <div key={upload.fileId} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card">
+              <Loader2 className="w-5 h-5 text-primary animate-spin flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{upload.fileName}</p>
+                <div className="w-full h-1.5 bg-muted rounded-full mt-1.5 overflow-hidden">
+                  <motion.div
+                    className="h-full bg-primary rounded-full"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${upload.progress}%` }}
+                  />
+                </div>
+              </div>
+              <span className="text-xs text-muted-foreground flex-shrink-0">
+                {Math.round(upload.progress)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Loading state */}
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 text-primary animate-spin" />
+        </div>
+      )}
+
       {/* Shared Files */}
-      {sharedFiles.length > 0 && (
+      {!loading && files.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Shared Files ({sharedFiles.length})
+              Shared Files ({files.length})
             </h2>
           </div>
 
           <div className="grid gap-3">
             <AnimatePresence>
-              {sharedFiles.map((file) => (
+              {files.map((file) => (
                 <SharedFileCard key={file.id} file={file} onRemove={removeFile} />
               ))}
             </AnimatePresence>
@@ -223,7 +220,7 @@ export default function QuickShare() {
       )}
 
       {/* Empty state */}
-      {sharedFiles.length === 0 && (
+      {!loading && files.length === 0 && uploads.length === 0 && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -240,7 +237,7 @@ export default function QuickShare() {
   )
 }
 
-function SharedFileCard({ file, onRemove }: { file: SharedFile; onRemove: (id: string) => void }) {
+function SharedFileCard({ file, onRemove }: { file: QuickShareFile; onRemove: (file: QuickShareFile) => void }) {
   const DeviceIcon = DEVICE_ICONS[file.senderDeviceType]
 
   return (
@@ -268,7 +265,7 @@ function SharedFileCard({ file, onRemove }: { file: SharedFile; onRemove: (id: s
       {/* File info */}
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{file.name}</p>
-        <div className="flex items-center gap-3 mt-1">
+        <div className="flex items-center gap-3 mt-1 flex-wrap">
           <span className="text-xs text-muted-foreground">{formatFileSize(file.size)}</span>
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <DeviceIcon className="w-3 h-3" />
@@ -276,7 +273,7 @@ function SharedFileCard({ file, onRemove }: { file: SharedFile; onRemove: (id: s
           </span>
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <Clock className="w-3 h-3" />
-            {getRelativeTime(new Date(file.createdAt))}
+            {getRelativeTime(file.createdAt)}
           </span>
         </div>
       </div>
@@ -285,6 +282,8 @@ function SharedFileCard({ file, onRemove }: { file: SharedFile; onRemove: (id: s
       <div className="flex items-center gap-1 flex-shrink-0">
         <a
           href={file.downloadUrl}
+          target="_blank"
+          rel="noopener noreferrer"
           download={file.name}
           className={cn(
             'p-2 rounded-lg transition-colors',
@@ -294,11 +293,11 @@ function SharedFileCard({ file, onRemove }: { file: SharedFile; onRemove: (id: s
           <Download className="w-5 h-5" />
         </a>
         <button
-          onClick={() => onRemove(file.id)}
+          onClick={() => onRemove(file)}
           className={cn(
             'p-2 rounded-lg transition-colors',
             'hover:bg-destructive/10 text-muted-foreground hover:text-destructive',
-            'opacity-0 group-hover:opacity-100'
+            'md:opacity-0 md:group-hover:opacity-100'
           )}
         >
           <X className="w-5 h-5" />
