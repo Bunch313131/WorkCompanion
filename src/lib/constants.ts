@@ -2,7 +2,7 @@
 export const APP_NAME = 'L.A.R.R.E.'
 export const APP_FULL_NAME = 'Largely Automated Record Repository, Eventually'
 export const APP_TAGLINE = 'Largely Automated Record Repository, Eventually'
-export const APP_LOGO: string | null = '/logo.png'
+export const APP_LOGO: string | null = `${import.meta.env.BASE_URL}logo.png`
 
 export const TAG_COLORS = [
   { name: 'Red', value: '#ef4444', bg: '#fef2f2' },
