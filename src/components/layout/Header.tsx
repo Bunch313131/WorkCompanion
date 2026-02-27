@@ -42,23 +42,23 @@ export function Header() {
       )}
     >
       {/* Left: Title / Logo on mobile */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 min-w-0 flex-shrink">
         {isMobile && (
           APP_LOGO ? (
-            <img src={APP_LOGO} alt={APP_NAME} className="w-36 h-auto" />
+            <img src={APP_LOGO} alt={APP_NAME} className="w-24 h-auto flex-shrink-0" />
           ) : (
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center flex-shrink-0">
               <Zap className="w-4 h-4 text-white" />
             </div>
           )
         )}
-        <h1 className="text-lg font-semibold">
+        <h1 className="text-lg font-semibold truncate">
           {pageTitle}
         </h1>
       </div>
 
       {/* Right: Actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 flex-shrink-0">
         {/* Search */}
         <AnimatePresence>
           {searchOpen ? (
