@@ -19,7 +19,8 @@
         var params = new URLSearchParams(window.location.search);
         var route = params.get('p');
         if (route) {
-          window.history.replaceState(null, null, route + window.location.hash);
+          var base = '/WorkCompanion';
+          window.history.replaceState(null, null, base + route + window.location.hash);
         }
       })();
     </script>
