@@ -16,6 +16,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/share': 'Quick Share',
   '/files': 'Files',
   '/notes': 'Notes',
+  '/calendar': 'Doc to Calendar',
   '/settings': 'Settings',
 }
 

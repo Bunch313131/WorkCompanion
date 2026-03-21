@@ -6,6 +6,7 @@ import {
   Share2,
   FolderOpen,
   StickyNote,
+  CalendarPlus,
   Settings,
   Sun,
   Moon,
@@ -19,6 +20,7 @@ const tabs = [
   { to: '/share', icon: Share2, label: 'Share' },
   { to: '/files', icon: FolderOpen, label: 'Files' },
   { to: '/notes', icon: StickyNote, label: 'Notes' },
+  { to: '/calendar', icon: CalendarPlus, label: 'Cal' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 

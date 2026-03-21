@@ -7,6 +7,7 @@ import {
   Share2,
   StickyNote,
   Settings,
+  CalendarPlus,
   ChevronLeft,
   ChevronRight,
   Sun,
@@ -24,6 +25,7 @@ const navItems = [
   { to: '/share', icon: Share2, label: 'Quick Share' },
   { to: '/files', icon: FolderOpen, label: 'Files' },
   { to: '/notes', icon: StickyNote, label: 'Notes' },
+  { to: '/calendar', icon: CalendarPlus, label: 'Doc to Cal' },
 ]
 
 const bottomItems = [
