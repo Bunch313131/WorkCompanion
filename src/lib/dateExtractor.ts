@@ -29,6 +29,10 @@ function parseTimeString(timeStr: string): { hours: number; minutes: number } | 
   // "2:30 PM", "14:30", "2pm", "2:30pm"
   const match = timeStr.match(/(\d{1,2}):?(\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?/i)
   if (!match) return null
+  const hasColon = timeStr.includes(':')
+  const hasMeridian = !!match[3]
+  // Require either a colon or am/pm — bare numbers like "17" are NOT times
+  if (!hasColon && !hasMeridian) return null
   let hours = parseInt(match[1], 10)
   const minutes = match[2] ? parseInt(match[2], 10) : 0
   const meridian = match[3]?.replace(/\./g, '').toLowerCase()
@@ -43,6 +47,20 @@ function getContextAround(text: string, matchStart: number, matchEnd: number, ra
   const start = Math.max(0, matchStart - radius)
   const end = Math.min(text.length, matchEnd + radius)
   return text.substring(start, end).trim()
+}
+
+function isGarbageTitle(title: string): boolean {
+  const t = title.trim()
+  if (t.length < 3) return true
+  // Reject "and 18", "and 21", "or 5", etc. — leftover from range text
+  if (/^(and|or|to|from|the|a|an|of|in|on|at|by)\s+\d+$/i.test(t)) return true
+  // Reject bare numbers or number-only strings
+  if (/^\d[\d\s,.\-\/]*$/.test(t)) return true
+  // Reject mid-word fragments (starts with lowercase and no spaces = likely truncated)
+  if (/^[a-z]/.test(t) && t.length < 8 && !t.includes(' ')) return true
+  // Reject if it's just a partial word ending (e.g., "nitiation of", "ommittee")
+  if (/^[a-z]{2,}tion\b|^[a-z]{2,}ment\b|^[a-z]{2,}ity\b|^[a-z]{2,}ing\b/i.test(t) && /^[a-z]/.test(t)) return true
+  return false
 }
 
 function inferTitleFromContext(context: string, dateText: string): string {
@@ -61,10 +79,10 @@ function inferTitleFromContext(context: string, dateText: string): string {
         let col = columns[i]
         // Remove task/workshop numbering prefixes
         col = col.replace(/^(Task\s*#?\d+|WS\s*#?\d+|LCWG\s*#?\d+)\s*/gi, '').trim()
-        if (col.length > 2) {
+        if (col.length > 2 && !isGarbageTitle(col)) {
           // If very long (multi-paragraph cell content), take first sentence
           if (col.length > 120) {
-            const firstSentence = col.split(/[.\n]/).find(s => s.trim().length > 2)
+            const firstSentence = col.split(/[.\n]/).find(s => s.trim().length > 2 && !isGarbageTitle(s.trim()))
             if (firstSentence) return firstSentence.trim()
           }
           return col
@@ -89,7 +107,7 @@ function inferTitleFromContext(context: string, dateText: string): string {
           .replace(/^\d{1,2}:\d{2}\s*/, '')
           .replace(/^[\s\-–—:|,;•]+|[\s\-–—:|,;•]+$/g, '')
           .trim()
-        if (cleaned.length > 2) return cleaned
+        if (cleaned.length > 2 && !isGarbageTitle(cleaned)) return cleaned
       }
     }
 
@@ -102,7 +120,7 @@ function inferTitleFromContext(context: string, dateText: string): string {
         .replace(/^\d{1,2}:\d{2}\s*/, '')
         .replace(/^[\s\-–—:|,;•]+|[\s\-–—:|,;•]+$/g, '')
         .trim()
-      if (cleaned.length > 2) return cleaned
+      if (cleaned.length > 2 && !isGarbageTitle(cleaned)) return cleaned
     }
   }
 
@@ -132,17 +150,18 @@ function inferTitleFromContext(context: string, dateText: string): string {
         c.length > 2 && c.length < 150 &&
         !/^(Task\s*#?\d+|WS\s*#?\d+|LCWG\s*#?\d+)$/i.test(c) &&
         !datePattern.test(c) && !timeOnlyPattern.test(c) &&
-        !/^\d[\d\s\/\-\.,:]+$/.test(c)
+        !/^\d[\d\s\/\-\.,:]+$/.test(c) &&
+        !isGarbageTitle(c)
       )
       if (candidates.length > 0) {
         let best = candidates[0]
         // Remove task numbering prefix
         best = best.replace(/^(Task\s*#?\d+|WS\s*#?\d+|LCWG\s*#?\d+)\s*/gi, '').trim()
         if (best.length > 120) {
-          const firstSentence = best.split(/[.\n]/).find(s => s.trim().length > 2)
+          const firstSentence = best.split(/[.\n]/).find(s => s.trim().length > 2 && !isGarbageTitle(s.trim()))
           if (firstSentence) return firstSentence.trim()
         }
-        if (best.length > 2) return best
+        if (best.length > 2 && !isGarbageTitle(best)) return best
       }
       continue
     }
@@ -153,7 +172,8 @@ function inferTitleFromContext(context: string, dateText: string): string {
       !datePattern.test(cleaned) &&
       !timeOnlyPattern.test(cleaned) &&
       cleaned !== dateText.trim() &&
-      !/^\d[\d\s\/\-\.,:]+$/.test(cleaned)
+      !/^\d[\d\s\/\-\.,:]+$/.test(cleaned) &&
+      !isGarbageTitle(cleaned)
     ) {
       return cleaned
     }
@@ -214,6 +234,36 @@ export function extractDatesFromText(text: string): IcsEvent[] {
     const endDay = parseInt(m[3], 10)
     const year = m[4] ? parseInt(m[4], 10) : currentYear
     if (month >= 0 && startDay >= 1 && startDay <= 31 && endDay >= 1 && endDay <= 31 && endDay >= startDay) {
+      const startDate = new Date(year, month, startDay)
+      const endDate = new Date(year, month, endDay)
+      if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+        const context = getContextAround(text, m.index, m.index + m[0].length)
+        matches.push({
+          date: startDate,
+          text: m[0],
+          context,
+          hasTime: false,
+          endDate,
+          recurrence: detectRecurrence(context),
+          confidence: m[4] ? 92 : 78,
+        })
+        rangeSpans.push({ start: m.index, end: m.index + m[0].length })
+      }
+    }
+  }
+
+  // Range Pattern A2: "Month DD and DD, YYYY" (same month, "and" separator)
+  // e.g., "March 17 and 18", "July 15 and 16, 2026"
+  const rpA2 = new RegExp(
+    `\\b(${MONTH_NAMES})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s+and\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s*(\\d{4})?\\b`,
+    'gi'
+  )
+  while ((m = rpA2.exec(text)) !== null) {
+    const month = monthIndex(m[1])
+    const startDay = parseInt(m[2], 10)
+    const endDay = parseInt(m[3], 10)
+    const year = m[4] ? parseInt(m[4], 10) : currentYear
+    if (month >= 0 && startDay >= 1 && startDay <= 31 && endDay >= 1 && endDay <= 31) {
       const startDate = new Date(year, month, startDay)
       const endDate = new Date(year, month, endDay)
       if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
