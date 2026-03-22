@@ -38,31 +38,127 @@ function parseTimeString(timeStr: string): { hours: number; minutes: number } | 
   return { hours, minutes }
 }
 
-function getContextAround(text: string, matchStart: number, matchEnd: number, radius = 200): string {
-  // grab surrounding text for context
-  const lineStart = text.lastIndexOf('\n', matchStart)
-  const lineEnd = text.indexOf('\n', matchEnd)
-  const start = Math.max(0, lineStart >= 0 ? lineStart : matchStart - radius)
-  const end = Math.min(text.length, lineEnd >= 0 ? lineEnd : matchEnd + radius)
+function getContextAround(text: string, matchStart: number, matchEnd: number, radius = 300): string {
+  // Grab several lines before and after the match for better context
+  const start = Math.max(0, matchStart - radius)
+  const end = Math.min(text.length, matchEnd + radius)
   return text.substring(start, end).trim()
 }
 
 function inferTitleFromContext(context: string, dateText: string): string {
-  // Try to extract a meaningful title from the context
   const lines = context.split('\n').map(l => l.trim()).filter(Boolean)
 
-  // Look for a heading-like line (short, capitalized, near the date)
-  for (const line of lines) {
+  // Find which line contains the date match
+  const dateLineIdx = lines.findIndex(l => l.includes(dateText.trim()))
+
+  // Strategy 1: Table column extraction
+  // If the date line has tab separators (table columns), look at the column before the date
+  if (dateLineIdx >= 0 && lines[dateLineIdx].includes('\t')) {
+    const columns = lines[dateLineIdx].split('\t').map(c => c.trim()).filter(Boolean)
+    const dateColIdx = columns.findIndex(c => c.includes(dateText.trim()))
+    if (dateColIdx > 0) {
+      for (let i = dateColIdx - 1; i >= 0; i--) {
+        let col = columns[i]
+        // Remove task/workshop numbering prefixes
+        col = col.replace(/^(Task\s*#?\d+|WS\s*#?\d+|LCWG\s*#?\d+)\s*/gi, '').trim()
+        if (col.length > 2) {
+          // If very long (multi-paragraph cell content), take first sentence
+          if (col.length > 120) {
+            const firstSentence = col.split(/[.\n]/).find(s => s.trim().length > 2)
+            if (firstSentence) return firstSentence.trim()
+          }
+          return col
+        }
+      }
+    }
+    // Also check columns after the date (comments column might have useful info)
+    // but prefer columns before
+  }
+
+  // Strategy 2: Same line, non-table - extract title from text around the date
+  if (dateLineIdx >= 0) {
+    const dateLine = lines[dateLineIdx]
+    const datePos = dateLine.indexOf(dateText.trim())
+
+    // Try text before the date first
+    if (datePos > 0) {
+      const beforeDate = dateLine.substring(0, datePos).replace(/[\s\-–—:|,;•]+$/g, '').trim()
+      if (beforeDate.length > 2 && beforeDate.length < 150) {
+        const cleaned = beforeDate
+          .replace(/\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)/gi, '')
+          .replace(/^\d{1,2}:\d{2}\s*/, '')
+          .replace(/^[\s\-–—:|,;•]+|[\s\-–—:|,;•]+$/g, '')
+          .trim()
+        if (cleaned.length > 2) return cleaned
+      }
+    }
+
+    // Try text after the date
+    const afterDate = dateLine.substring(datePos + dateText.trim().length)
+      .replace(/^[\s\-–—:|,;•]+/, '').trim()
+    if (afterDate.length > 2 && afterDate.length < 150) {
+      const cleaned = afterDate
+        .replace(/\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)/gi, '')
+        .replace(/^\d{1,2}:\d{2}\s*/, '')
+        .replace(/^[\s\-–—:|,;•]+|[\s\-–—:|,;•]+$/g, '')
+        .trim()
+      if (cleaned.length > 2) return cleaned
+    }
+  }
+
+  // Strategy 3: Search nearby lines (up to 10 before and after)
+  const searchOrder: number[] = []
+  if (dateLineIdx >= 0) {
+    for (let i = 1; i <= 10; i++) {
+      if (dateLineIdx - i >= 0) searchOrder.push(dateLineIdx - i)
+    }
+    for (let i = 1; i <= 5; i++) {
+      if (dateLineIdx + i < lines.length) searchOrder.push(dateLineIdx + i)
+    }
+  } else {
+    for (let i = 0; i < lines.length; i++) searchOrder.push(i)
+  }
+
+  const datePattern = /^\d{1,2}[\/:.\-]\d{1,2}[\/:.\-]\d{2,4}$|^\d{4}-\d{2}-\d{2}$|^\d{1,2}(:\d{2})?\s*(am|pm)$/i
+  const timeOnlyPattern = /^\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)\s*[-–to]*\s*\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?$/i
+
+  for (const idx of searchOrder) {
+    let line = lines[idx]
+    // For tab-separated lines, try to extract the best column (prefer topic-like columns)
+    if (line.includes('\t')) {
+      const cols = line.split('\t').map(c => c.trim()).filter(Boolean)
+      // Skip first column if it looks like a task number
+      const candidates = cols.filter(c =>
+        c.length > 2 && c.length < 150 &&
+        !/^(Task\s*#?\d+|WS\s*#?\d+|LCWG\s*#?\d+)$/i.test(c) &&
+        !datePattern.test(c) && !timeOnlyPattern.test(c) &&
+        !/^\d[\d\s\/\-\.,:]+$/.test(c)
+      )
+      if (candidates.length > 0) {
+        let best = candidates[0]
+        // Remove task numbering prefix
+        best = best.replace(/^(Task\s*#?\d+|WS\s*#?\d+|LCWG\s*#?\d+)\s*/gi, '').trim()
+        if (best.length > 120) {
+          const firstSentence = best.split(/[.\n]/).find(s => s.trim().length > 2)
+          if (firstSentence) return firstSentence.trim()
+        }
+        if (best.length > 2) return best
+      }
+      continue
+    }
     const cleaned = line.replace(/^[\-\*\#\•\d\.]+\s*/, '').trim()
     if (
-      cleaned.length > 3 &&
-      cleaned.length < 120 &&
-      !cleaned.match(/^\d{1,2}[\/:]\d{1,2}/) && // not a date itself
-      cleaned !== dateText.trim()
+      cleaned.length > 2 &&
+      cleaned.length < 150 &&
+      !datePattern.test(cleaned) &&
+      !timeOnlyPattern.test(cleaned) &&
+      cleaned !== dateText.trim() &&
+      !/^\d[\d\s\/\-\.,:]+$/.test(cleaned)
     ) {
       return cleaned
     }
   }
+
   return 'Event'
 }
 
@@ -318,10 +414,41 @@ async function extractTextFromPDF(file: File): Promise<string> {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i)
     const content = await page.getTextContent()
-    const pageText = content.items
-      .map((item: any) => item.str)
-      .join(' ')
-    textParts.push(pageText)
+    // Use Y-position data to reconstruct line breaks
+    // Use X-position gaps to detect table columns (insert \t)
+    let lastY: number | null = null
+    let lastEndX: number | null = null
+    const lines: string[] = []
+    let currentLine = ''
+    for (const item of content.items as any[]) {
+      if (!item.str) continue
+      const y = item.transform?.[5]
+      const x = item.transform?.[4]
+      const itemWidth = item.width || 0
+
+      // New line if Y changed significantly
+      if (lastY !== null && y !== undefined && Math.abs(y - lastY) > 2) {
+        lines.push(currentLine.trim())
+        currentLine = ''
+        lastEndX = null
+      }
+
+      // Detect column boundaries by large X-position gaps
+      if (lastEndX !== null && x !== undefined) {
+        const gap = x - lastEndX
+        if (gap > 30) {
+          currentLine += '\t'
+        } else if (currentLine && !currentLine.endsWith('\t')) {
+          currentLine += ' '
+        }
+      }
+
+      currentLine += item.str
+      if (x !== undefined) lastEndX = x + itemWidth
+      if (y !== undefined) lastY = y
+    }
+    if (currentLine.trim()) lines.push(currentLine.trim())
+    textParts.push(lines.filter(Boolean).join('\n'))
   }
 
   return textParts.join('\n\n')
