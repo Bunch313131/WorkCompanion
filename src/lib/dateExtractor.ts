@@ -468,7 +468,7 @@ export function extractDatesFromText(text: string): IcsEvent[] {
         if (tm[2]) {
           const endTime = parseTimeString(tm[2])
           if (endTime) {
-            const end = new Date(match.date)
+            const end = new Date(match.endDate || match.date)
             end.setHours(endTime.hours, endTime.minutes)
             match.endDate = end
           }
