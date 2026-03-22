@@ -190,11 +190,174 @@ function detectRecurrence(context: string): RecurrenceRule | null {
 export function extractDatesFromText(text: string): IcsEvent[] {
   const matches: RawDateMatch[] = []
   const currentYear = new Date().getFullYear()
+  // Track positions consumed by range patterns so individual patterns skip them
+  const rangeSpans: Array<{ start: number; end: number }> = []
+
+  function isInRange(index: number): boolean {
+    return rangeSpans.some(s => index >= s.start && index < s.end)
+  }
+
+  const MONTH_NAMES = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec'
+
+  // === Date Range Patterns (run first to catch multi-day events) ===
+
+  // Range Pattern A: "Month DD-DD, YYYY" or "Month DD-DD" (same month range)
+  // e.g., "March 22-25, 2026", "June 5-8", "March 22nd-25th"
+  const rpA = new RegExp(
+    `\\b(${MONTH_NAMES})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s*[-–—]+\\s*(\\d{1,2})(?:st|nd|rd|th)?,?\\s*(\\d{4})?\\b`,
+    'gi'
+  )
+  let m: RegExpExecArray | null
+  while ((m = rpA.exec(text)) !== null) {
+    const month = monthIndex(m[1])
+    const startDay = parseInt(m[2], 10)
+    const endDay = parseInt(m[3], 10)
+    const year = m[4] ? parseInt(m[4], 10) : currentYear
+    if (month >= 0 && startDay >= 1 && startDay <= 31 && endDay >= 1 && endDay <= 31 && endDay >= startDay) {
+      const startDate = new Date(year, month, startDay)
+      const endDate = new Date(year, month, endDay)
+      if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+        const context = getContextAround(text, m.index, m.index + m[0].length)
+        matches.push({
+          date: startDate,
+          text: m[0],
+          context,
+          hasTime: false,
+          endDate,
+          recurrence: detectRecurrence(context),
+          confidence: m[4] ? 92 : 78,
+        })
+        rangeSpans.push({ start: m.index, end: m.index + m[0].length })
+      }
+    }
+  }
+
+  // Range Pattern B: "Month DD - Month DD, YYYY" or "Month DD, YYYY - Month DD, YYYY"
+  // e.g., "March 22 - March 25, 2026", "Jan 5, 2026 - Jan 10, 2026"
+  const rpB = new RegExp(
+    `\\b(${MONTH_NAMES})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s*(\\d{4})?\\s*[-–—]+\\s*(${MONTH_NAMES})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s*(\\d{4})?\\b`,
+    'gi'
+  )
+  while ((m = rpB.exec(text)) !== null) {
+    const startMonth = monthIndex(m[1])
+    const startDay = parseInt(m[2], 10)
+    const startYear = m[3] ? parseInt(m[3], 10) : (m[6] ? parseInt(m[6], 10) : currentYear)
+    const endMonth = monthIndex(m[4])
+    const endDay = parseInt(m[5], 10)
+    const endYear = m[6] ? parseInt(m[6], 10) : startYear
+    if (startMonth >= 0 && endMonth >= 0 && startDay >= 1 && startDay <= 31 && endDay >= 1 && endDay <= 31) {
+      const startDate = new Date(startYear, startMonth, startDay)
+      const endDate = new Date(endYear, endMonth, endDay)
+      if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime()) && endDate >= startDate) {
+        const context = getContextAround(text, m.index, m.index + m[0].length)
+        matches.push({
+          date: startDate,
+          text: m[0],
+          context,
+          hasTime: false,
+          endDate,
+          recurrence: detectRecurrence(context),
+          confidence: (m[3] || m[6]) ? 92 : 78,
+        })
+        rangeSpans.push({ start: m.index, end: m.index + m[0].length })
+      }
+    }
+  }
+
+  // Range Pattern C: "MM/DD/YYYY - MM/DD/YYYY" (numeric date ranges)
+  // e.g., "3/22/2026 - 3/25/2026", "03/22/26 - 03/25/26"
+  const rpC = /\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})\s*[-–—]+\s*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})\b/g
+  while ((m = rpC.exec(text)) !== null) {
+    const a1 = parseInt(m[1], 10), b1 = parseInt(m[2], 10)
+    let y1 = parseInt(m[3], 10)
+    if (y1 < 100) y1 += 2000
+    const a2 = parseInt(m[4], 10), b2 = parseInt(m[5], 10)
+    let y2 = parseInt(m[6], 10)
+    if (y2 < 100) y2 += 2000
+
+    let sm = a1 - 1, sd = b1, em = a2 - 1, ed = b2
+    if (sm < 0 || sm > 11 || sd < 1 || sd > 31) { sm = b1 - 1; sd = a1 }
+    if (em < 0 || em > 11 || ed < 1 || ed > 31) { em = b2 - 1; ed = a2 }
+
+    if (sm >= 0 && sm <= 11 && sd >= 1 && sd <= 31 && em >= 0 && em <= 11 && ed >= 1 && ed <= 31) {
+      const startDate = new Date(y1, sm, sd)
+      const endDate = new Date(y2, em, ed)
+      if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime()) && endDate >= startDate) {
+        const context = getContextAround(text, m.index, m.index + m[0].length)
+        matches.push({
+          date: startDate,
+          text: m[0],
+          context,
+          hasTime: false,
+          endDate,
+          recurrence: detectRecurrence(context),
+          confidence: 88,
+        })
+        rangeSpans.push({ start: m.index, end: m.index + m[0].length })
+      }
+    }
+  }
+
+  // Range Pattern D: "YYYY-MM-DD - YYYY-MM-DD" (ISO date ranges)
+  const rpD = /\b(\d{4})-(\d{2})-(\d{2})\s*[-–—]+\s*(\d{4})-(\d{2})-(\d{2})\b/g
+  while ((m = rpD.exec(text)) !== null) {
+    const y1 = parseInt(m[1], 10), mo1 = parseInt(m[2], 10) - 1, d1 = parseInt(m[3], 10)
+    const y2 = parseInt(m[4], 10), mo2 = parseInt(m[5], 10) - 1, d2 = parseInt(m[6], 10)
+    if (y1 >= 1900 && y1 <= 2100 && y2 >= 1900 && y2 <= 2100) {
+      const startDate = new Date(y1, mo1, d1)
+      const endDate = new Date(y2, mo2, d2)
+      if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime()) && endDate >= startDate) {
+        const context = getContextAround(text, m.index, m.index + m[0].length)
+        matches.push({
+          date: startDate,
+          text: m[0],
+          context,
+          hasTime: false,
+          endDate,
+          recurrence: detectRecurrence(context),
+          confidence: 96,
+        })
+        rangeSpans.push({ start: m.index, end: m.index + m[0].length })
+      }
+    }
+  }
+
+  // Range Pattern E: "DD-DD Month YYYY" or "DD-DD Month" (day range before month)
+  // e.g., "22-25 March 2026", "5-8 June"
+  const rpE = new RegExp(
+    `\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*[-–—]+\\s*(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MONTH_NAMES})\\.?,?\\s*(\\d{4})?\\b`,
+    'gi'
+  )
+  while ((m = rpE.exec(text)) !== null) {
+    const startDay = parseInt(m[1], 10)
+    const endDay = parseInt(m[2], 10)
+    const month = monthIndex(m[3])
+    const year = m[4] ? parseInt(m[4], 10) : currentYear
+    if (month >= 0 && startDay >= 1 && startDay <= 31 && endDay >= 1 && endDay <= 31 && endDay >= startDay) {
+      const startDate = new Date(year, month, startDay)
+      const endDate = new Date(year, month, endDay)
+      if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+        const context = getContextAround(text, m.index, m.index + m[0].length)
+        matches.push({
+          date: startDate,
+          text: m[0],
+          context,
+          hasTime: false,
+          endDate,
+          recurrence: detectRecurrence(context),
+          confidence: m[4] ? 92 : 78,
+        })
+        rangeSpans.push({ start: m.index, end: m.index + m[0].length })
+      }
+    }
+  }
+
+  // === Individual Date Patterns (skip positions already consumed by ranges) ===
 
   // Pattern 1: "Month DD, YYYY" or "Month DD YYYY"
   const p1 = /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})?\b/gi
-  let m: RegExpExecArray | null
   while ((m = p1.exec(text)) !== null) {
+    if (isInRange(m.index)) continue
     const month = monthIndex(m[1])
     const day = parseInt(m[2], 10)
     const year = m[3] ? parseInt(m[3], 10) : currentYear
@@ -217,6 +380,7 @@ export function extractDatesFromText(text: string): IcsEvent[] {
   // Pattern 2: "MM/DD/YYYY" or "MM-DD-YYYY" or "MM.DD.YYYY"
   const p2 = /\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})\b/g
   while ((m = p2.exec(text)) !== null) {
+    if (isInRange(m.index)) continue
     const a = parseInt(m[1], 10)
     const b = parseInt(m[2], 10)
     let year = parseInt(m[3], 10)
@@ -248,6 +412,7 @@ export function extractDatesFromText(text: string): IcsEvent[] {
   // Pattern 3: "YYYY-MM-DD" (ISO)
   const p3 = /\b(\d{4})-(\d{2})-(\d{2})\b/g
   while ((m = p3.exec(text)) !== null) {
+    if (isInRange(m.index)) continue
     const year = parseInt(m[1], 10)
     const month = parseInt(m[2], 10) - 1
     const day = parseInt(m[3], 10)
@@ -270,6 +435,7 @@ export function extractDatesFromText(text: string): IcsEvent[] {
   // Pattern 4: "DD Month YYYY" (e.g., "15 March 2025")
   const p4 = /\b(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.?,?\s*(\d{4})?\b/gi
   while ((m = p4.exec(text)) !== null) {
+    if (isInRange(m.index)) continue
     const day = parseInt(m[1], 10)
     const month = monthIndex(m[2])
     const year = m[3] ? parseInt(m[3], 10) : currentYear

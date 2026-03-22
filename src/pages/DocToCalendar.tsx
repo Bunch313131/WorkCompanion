@@ -574,6 +574,7 @@ function EventCard({
             <span className="flex items-center gap-1">
               <Clock className="w-3 h-3" />
               {formatDisplayDate(event.startDate)}
+              {event.endDate && event.endDate !== event.startDate && ` – ${formatDisplayDate(event.endDate)}`}
               {event.startTime && ` at ${event.startTime}`}
               {event.allDay && ' (All Day)'}
             </span>
@@ -679,7 +680,14 @@ function EventEditForm({ event, onUpdate, onDone }: EventEditFormProps) {
           <input
             type="date"
             value={event.startDate}
-            onChange={(e) => onUpdate({ startDate: e.target.value, endDate: e.target.value })}
+            onChange={(e) => {
+              const updates: Record<string, string> = { startDate: e.target.value }
+              // Only sync endDate if it was same as startDate (single-day event)
+              if (event.endDate === event.startDate || !event.endDate) {
+                updates.endDate = e.target.value
+              }
+              onUpdate(updates)
+            }}
             className={inputClass}
           />
         </div>
