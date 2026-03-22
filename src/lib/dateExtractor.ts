@@ -38,31 +38,68 @@ function parseTimeString(timeStr: string): { hours: number; minutes: number } | 
   return { hours, minutes }
 }
 
-function getContextAround(text: string, matchStart: number, matchEnd: number, radius = 200): string {
-  // grab surrounding text for context
-  const lineStart = text.lastIndexOf('\n', matchStart)
-  const lineEnd = text.indexOf('\n', matchEnd)
-  const start = Math.max(0, lineStart >= 0 ? lineStart : matchStart - radius)
-  const end = Math.min(text.length, lineEnd >= 0 ? lineEnd : matchEnd + radius)
+function getContextAround(text: string, matchStart: number, matchEnd: number, radius = 300): string {
+  // Grab several lines before and after the match for better context
+  const start = Math.max(0, matchStart - radius)
+  const end = Math.min(text.length, matchEnd + radius)
   return text.substring(start, end).trim()
 }
 
 function inferTitleFromContext(context: string, dateText: string): string {
-  // Try to extract a meaningful title from the context
   const lines = context.split('\n').map(l => l.trim()).filter(Boolean)
 
-  // Look for a heading-like line (short, capitalized, near the date)
-  for (const line of lines) {
+  // Find which line contains the date match
+  const dateLineIdx = lines.findIndex(l => l.includes(dateText.trim()))
+
+  // Check if the date line itself contains a title (e.g., "Workshop Title - March 25, 2026")
+  if (dateLineIdx >= 0) {
+    const dateLine = lines[dateLineIdx]
+    // Remove the date text and common separators to see if there's a title on the same line
+    const withoutDate = dateLine
+      .replace(dateText.trim(), '')
+      .replace(/^[\s\-–—:|,;•]+|[\s\-–—:|,;•]+$/g, '')
+      .trim()
+    if (withoutDate.length > 2 && withoutDate.length < 150) {
+      // Also remove time patterns from the candidate
+      const withoutTime = withoutDate.replace(/\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)/gi, '').replace(/^[\s\-–—:|,;•]+|[\s\-–—:|,;•]+$/g, '').trim()
+      if (withoutTime.length > 2) return withoutTime
+    }
+  }
+
+  // Look at nearby lines (prefer lines before the date, then after)
+  const searchOrder: number[] = []
+  if (dateLineIdx >= 0) {
+    // Check 1-3 lines before, then 1-3 lines after
+    for (let i = 1; i <= 3; i++) {
+      if (dateLineIdx - i >= 0) searchOrder.push(dateLineIdx - i)
+    }
+    for (let i = 1; i <= 3; i++) {
+      if (dateLineIdx + i < lines.length) searchOrder.push(dateLineIdx + i)
+    }
+  } else {
+    // Fallback: check all lines
+    for (let i = 0; i < lines.length; i++) searchOrder.push(i)
+  }
+
+  const datePattern = /^\d{1,2}[\/:.\-]\d{1,2}[\/:.\-]\d{2,4}$|^\d{4}-\d{2}-\d{2}$|^\d{1,2}(:\d{2})?\s*(am|pm)$/i
+  const timeOnlyPattern = /^\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)\s*[-–to]*\s*\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?$/i
+
+  for (const idx of searchOrder) {
+    const line = lines[idx]
     const cleaned = line.replace(/^[\-\*\#\•\d\.]+\s*/, '').trim()
     if (
-      cleaned.length > 3 &&
-      cleaned.length < 120 &&
-      !cleaned.match(/^\d{1,2}[\/:]\d{1,2}/) && // not a date itself
-      cleaned !== dateText.trim()
+      cleaned.length > 2 &&
+      cleaned.length < 150 &&
+      !datePattern.test(cleaned) &&
+      !timeOnlyPattern.test(cleaned) &&
+      cleaned !== dateText.trim() &&
+      // Skip lines that are mostly numbers/dates
+      !/^\d[\d\s\/\-\.,:]+$/.test(cleaned)
     ) {
       return cleaned
     }
   }
+
   return 'Event'
 }
 
@@ -318,10 +355,22 @@ async function extractTextFromPDF(file: File): Promise<string> {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i)
     const content = await page.getTextContent()
-    const pageText = content.items
-      .map((item: any) => item.str)
-      .join(' ')
-    textParts.push(pageText)
+    // Use Y-position data to reconstruct line breaks
+    let lastY: number | null = null
+    const lines: string[] = []
+    let currentLine = ''
+    for (const item of content.items as any[]) {
+      if (!item.str) continue
+      const y = item.transform?.[5]
+      if (lastY !== null && y !== undefined && Math.abs(y - lastY) > 2) {
+        lines.push(currentLine.trim())
+        currentLine = ''
+      }
+      currentLine += (currentLine ? ' ' : '') + item.str
+      if (y !== undefined) lastY = y
+    }
+    if (currentLine.trim()) lines.push(currentLine.trim())
+    textParts.push(lines.filter(Boolean).join('\n'))
   }
 
   return textParts.join('\n\n')
